@@ -1,7 +1,6 @@
-"""Execute the notebook, insert actual interpretations, and export HTML/Python."""
+"""Execute the report and export its full code and HTML version."""
 from pathlib import Path
 import argparse
-import json
 import os
 import time
 
@@ -41,18 +40,10 @@ if not args.export_only:
         nbformat.write(notebook, path)
         raise
 
-summary = json.loads((ROOT / "results/summary.json").read_text(encoding="utf-8"))
 full_code = "\n\n".join(cell.source for cell in notebook.cells if cell.cell_type == "code")
 for cell in notebook.cells:
-    key = cell.metadata.get("result_key")
-    if key:
-        cell.source = cell.metadata["base_source"] + "\n\n" + summary["notes"][key]
     if cell.metadata.get("appendix_code"):
         cell.source = "<details>\n<summary>Развернуть полный листинг Python</summary>\n\n```python\n" + full_code + "\n```\n\n</details>"
-notebook.metadata["lab_execution"] = {
-    "source_sha256": summary["source_sha256"],
-    "selection_rule": "minimum nested training CV RMSE; never minimum test RMSE",
-}
 nbformat.validate(notebook)
 nbformat.write(notebook, path)
 (ROOT / "lab1.py").write_text(

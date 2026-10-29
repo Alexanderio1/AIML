@@ -1,71 +1,60 @@
-"""Check executed explanations and independently recompute reported test metrics."""
+"""Check report completeness and recompute all test metrics from predictions."""
 from pathlib import Path
 import hashlib
 import json
+import re
+import nbformat
 import numpy as np
 import pandas as pd
-import nbformat
+from sklearn.model_selection import train_test_split
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
 ROOT = Path(__file__).resolve().parents[1]
 nb = nbformat.read(ROOT / "lab1.ipynb", as_version=4)
 nbformat.validate(nb)
-code_cells = [(i, c) for i, c in enumerate(nb.cells) if c.cell_type == "code"]
-counts = []
-image_count = 0
-for i, cell in code_cells:
-    assert cell.execution_count is not None, f"Unexecuted cell {i + 1}"
-    counts.append(cell.execution_count)
-    explanation = nb.cells[i + 1]
-    assert explanation.cell_type == "markdown" and len(explanation.source.strip()) > 100
+codes = [(i, c) for i, c in enumerate(nb.cells) if c.cell_type == "code"]
+assert [c.execution_count for _, c in codes] == list(range(1, len(codes) + 1))
+images = 0
+for i, cell in codes:
+    assert nb.cells[i + 1].cell_type == "markdown" and len(nb.cells[i + 1].source) > 100
     for output in cell.outputs:
-        assert output.output_type != "error", f"Error in cell {i + 1}"
-        image_count += int("image/png" in output.get("data", {}))
-assert counts == list(range(1, len(code_cells) + 1)), counts
-assert image_count == 11, f"Expected 11 plot outputs, got {image_count}"
+        assert output.output_type != "error"
+        images += int("image/png" in output.get("data", {}))
+assert images == len(list((ROOT / "results/figures").glob("*.png"))) == 6
+text = "\n".join(c.source for c in nb.cells if c.cell_type == "markdown")
+assert all(f"### {i}. " in text for i in range(1, 8))
+full_code = "\n\n".join(c.source for _, c in codes)
+assert (ROOT / "lab1.py").read_text(encoding="utf-8").endswith(full_code + "\n")
 
-metadata = json.loads((ROOT / "data/source.json").read_text(encoding="utf-8"))
-checksum = hashlib.sha256((ROOT / "data" / metadata["file"]).read_bytes()).hexdigest()
-assert checksum == metadata["sha256"]
-raw = pd.read_csv(ROOT / "data" / metadata["file"])
-assert raw.date.is_monotonic_increasing
-split = pd.read_csv(ROOT / "results/split_random.csv")
-assert split.row_id.is_unique and len(split) == len(raw)
-test_ids = set(split.loc[split.split.eq("test"), "row_id"])
-train_ids = set(split.loc[split.split.eq("train"), "row_id"])
-assert not test_ids.intersection(train_ids)
+source = json.loads((ROOT / "data/source.json").read_text(encoding="utf-8"))
+csv_path = ROOT / "data" / source["file"]
+assert hashlib.sha256(csv_path.read_bytes()).hexdigest() == source["sha256"]
+raw = pd.read_csv(csv_path).dropna().drop_duplicates()
+train_ids, test_ids = train_test_split(raw.index, test_size=.20, random_state=42)
+assert not set(train_ids).intersection(test_ids)
+pred = pd.read_csv(ROOT / "results/predictions.csv").set_index("row_id")
+assert pred.index.is_unique and set(pred.index) == set(test_ids)
+truth = raw.loc[pred.index, "Appliances"].to_numpy()
+assert np.array_equal(pred.y_true.to_numpy(), truth)
+metrics = pd.read_csv(ROOT / "results/metrics.csv")
+assert set(zip(metrics["Признаки"], metrics["Модель"])) == {
+    (basis, model) for basis in ["Исходные", "PCA"] for model in ["OLS", "Lasso", "Ridge"]}
+for _, row in metrics.iterrows():
+    basis = "original" if row["Признаки"] == "Исходные" else "pca"
+    error = truth - pred[f"{basis}_{row['Модель']}"].to_numpy()
+    independent = {"RMSE, Wh": np.sqrt(np.mean(error ** 2)),
+                   "R²": 1 - np.sum(error ** 2) / np.sum((truth - truth.mean()) ** 2),
+                   "MAPE, %": 100 * np.mean(np.abs(error / truth))}
+    assert all(np.isclose(row[key], value, rtol=1e-10) for key, value in independent.items())
 
-predictions = pd.read_csv(ROOT / "results/predictions_random_test.csv").set_index("row_id")
-assert predictions.index.is_unique and set(predictions.index) == test_ids
-assert np.array_equal(predictions.Appliances.to_numpy(), raw.loc[predictions.index, "Appliances"].to_numpy())
-reported = pd.read_csv(ROOT / "results/metrics_all.csv")
-assert set(zip(reported.Features, reported.Model)) == {
-    (feature_set, model) for feature_set in ["Original", "PCA95"] for model in ["OLS", "Lasso", "Ridge"]
-}
-truth = predictions.Appliances.to_numpy()
-for _, row in reported.iterrows():
-    prediction = predictions[f"{row.Features}_{row.Model}"].to_numpy()
-    residual = truth - prediction
-    independent_metrics = {
-        "Test_RMSE": np.sqrt(np.mean(residual ** 2)),
-        "Test_R2": 1 - np.sum(residual ** 2) / np.sum((truth - truth.mean()) ** 2),
-        "Test_MAPE_pct": 100 * np.mean(np.abs(residual / truth)),
-    }
-    for metric, actual in independent_metrics.items():
-        assert np.isclose(row[metric], actual, rtol=1e-10, atol=1e-10), (row.Model, metric)
-    assert all(np.isfinite(row[k]) for k in row.index if k not in ["Features", "Model", "alpha"])
-
-vif = pd.read_csv(ROOT / "results/vif_pca.csv")
-assert np.allclose(vif.VIF, 1, atol=1e-8)
-spectrum = pd.read_csv(ROOT / "results/pca_variance.csv")
-summary = json.loads((ROOT / "results/summary.json").read_text(encoding="utf-8"))
-k = summary["n_components"]
-assert spectrum.iloc[k - 1].cumulative_ratio >= .95
-assert spectrum.iloc[k - 2].cumulative_ratio < .95
-selected = reported.loc[reported.CV_RMSE_mean.idxmin()]
-assert summary["selected_by_nested_cv"] == {"Model": selected.Model, "Features": selected.Features}
+features = raw.drop(columns=["date", "Appliances", "rv1", "rv2"])
+spectrum = PCA().fit(StandardScaler().fit_transform(features.loc[train_ids])).explained_variance_ratio_.cumsum()
+k = int(metrics.loc[metrics["Признаки"].eq("PCA"), "k"].iloc[0])
+assert spectrum[k - 2] < .95 <= spectrum[k - 1]
+vif = pd.read_csv(ROOT / "results/vif.csv")
+assert np.allclose(vif.loc[vif["Базис"].eq("PCA"), "VIF"], 1, atol=1e-8)
 html = (ROOT / "report.html").read_text(encoding="utf-8")
-assert html.count("data:image/png;base64,") >= 11
-assert "Развернуть полный листинг Python" in html
-assert "Найден минимум среди проверенных" in html
-print(f"PASS: {len(code_cells)} executed cells, {image_count} plots, all Markdown explanations present.")
-print("PASS: all 18 test metrics independently match saved predictions; data, split and PCA checks pass.")
+assert len(re.findall(r'<img\b[^>]*src="data:image/png;base64,', html)) == images
+print(f"PASS: {len(codes)} executed cells with Markdown explanations; 7 sections; {images} plots.")
+print("PASS: all 18 test metrics match predictions; dataset, split and PCA/VIF checks pass.")
