@@ -1,0 +1,15 @@
+{
+  "dataset": "Appliances Energy Prediction",
+  "selected_kaggle_page": "https://www.kaggle.com/datasets/loveall/appliances-energy-prediction",
+  "uci_page": "https://archive.ics.uci.edu/dataset/374/appliances+energy+prediction",
+  "downloaded_from": "https://raw.githubusercontent.com/LuisM78/Appliances-energy-prediction-data/e3e4c27a4ae2b41b21f84b4c9ac2d822d3d0ace1/energydata_complete.csv",
+  "source_repository": "https://github.com/LuisM78/Appliances-energy-prediction-data",
+  "source_commit": "e3e4c27a4ae2b41b21f84b4c9ac2d822d3d0ace1",
+  "file": "energydata_complete.csv",
+  "sha256": "2820bf712ad0275cb18b85a05250926100d8e65ebb9f4d2d016ca91ea152a25d",
+  "rows": 19735,
+  "columns": 29,
+  "paper": "Candanedo, L. M., Feldheim, V., Deramaix, D. Data driven prediction models of energy use of appliances in a low-energy house. Energy and Buildings 140 (2017), 81–97.",
+  "paper_doi": "10.1016/j.enbuild.2017.01.083",
+  "note": "Использован CSV из репозитория автора исходного исследования. Это исходный набор выбранной публикации на Kaggle; побайтовое совпадение с архивом Kaggle отдельно не проверялось."
+}

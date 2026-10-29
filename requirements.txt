@@ -1,0 +1,12 @@
+numpy==2.3.5
+pandas==2.2.3
+scipy==1.17.0
+scikit-learn==1.8.0
+matplotlib==3.10.8
+seaborn==0.13.2
+statsmodels==0.14.6
+threadpoolctl==3.6.0
+nbformat==5.10.4
+nbclient==0.10.4
+nbconvert==7.17.0
+ipykernel==7.1.0
